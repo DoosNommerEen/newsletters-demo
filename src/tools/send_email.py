@@ -1,19 +1,15 @@
-"""Gmail email sending tool using SMTP with STARTTLS.
+"""Email sending tool using the Resend API.
 
-Builds a styled HTML newsletter email and sends it via Gmail using an App Password.
+Builds a styled HTML newsletter email and sends it via Resend (HTTPS).
 Recipients are read from the NEWSLETTER_RECIPIENTS environment variable.
 """
 
 import logging
 import os
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+
+import resend
 
 log = logging.getLogger(__name__)
-
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 587
 
 
 def _build_html(summary: dict, gamma_url: str, week_label: str) -> str:
@@ -165,7 +161,7 @@ def _build_html(summary: dict, gamma_url: str, week_label: str) -> str:
 
 
 def run_send_email(summary: dict, gamma_url: str, week_label: str) -> None:
-    """Build and send the HTML newsletter email via Gmail SMTP.
+    """Build and send the HTML newsletter email via Resend.
 
     Args:
         summary: Structured summary dict from summarise.run_summarise.
@@ -174,35 +170,27 @@ def run_send_email(summary: dict, gamma_url: str, week_label: str) -> None:
 
     Raises:
         RuntimeError: If required environment variables are missing.
-        smtplib.SMTPException: On SMTP delivery errors.
     """
-    sender = os.environ.get("GMAIL_SENDER")
-    app_password = os.environ.get("GMAIL_APP_PASSWORD")
+    api_key = os.environ.get("RESEND_API_KEY")
+    sender = os.environ.get("RESEND_FROM", "AI Newsletter <onboarding@resend.dev>")
     recipients_raw = os.environ.get("NEWSLETTER_RECIPIENTS", "")
 
-    if not sender:
-        raise RuntimeError("GMAIL_SENDER environment variable is not set.")
-    if not app_password:
-        raise RuntimeError("GMAIL_APP_PASSWORD environment variable is not set.")
+    if not api_key:
+        raise RuntimeError("RESEND_API_KEY environment variable is not set.")
     if not recipients_raw:
         raise RuntimeError("NEWSLETTER_RECIPIENTS environment variable is not set.")
 
+    resend.api_key = api_key
     recipients = [r.strip() for r in recipients_raw.split(",") if r.strip()]
-    subject = f"AI & Tech Trends — {week_label}"
+    subject = f"AI & Tech Trends \u2014 {week_label}"
     html_body = _build_html(summary, gamma_url, week_label)
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = sender
-    msg["To"] = ", ".join(recipients)
-    msg.attach(MIMEText(html_body, "html"))
-
-    log.info("Connecting to Gmail SMTP (%s:%d)...", SMTP_HOST, SMTP_PORT)
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
-        smtp.ehlo()
-        smtp.starttls()
-        smtp.ehlo()
-        smtp.login(sender, app_password)
-        smtp.sendmail(sender, recipients, msg.as_string())
+    log.info("Sending email via Resend...")
+    resend.Emails.send({
+        "from": sender,
+        "to": recipients,
+        "subject": subject,
+        "html": html_body,
+    })
 
     log.info("Email sent successfully to: %s", ", ".join(recipients))
